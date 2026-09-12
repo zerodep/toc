@@ -1,0 +1,4 @@
+node_modules/
+types/index.d.ts
+tsconfig.json
+index.cjs

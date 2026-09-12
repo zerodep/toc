@@ -1,0 +1,6 @@
+{
+  "recursive": true,
+  "extension": ["js"],
+  "exit": true,
+  "require": ["chai/register-expect.js"]
+}
