@@ -1,6 +1,6 @@
 {
   "name": "@0dep/toc",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Generate a GitHub flavoured markdown table of contents",
   "type": "module",
   "sideEffects": false,
@@ -59,7 +59,7 @@
   "bugs": {
     "url": "https://github.com/zerodep/toc/issues"
   },
-  "homepage": "https://0dep.se/tools",
+  "homepage": "https://0dep.se/toc/",
   "license": "MIT",
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -17,7 +17,6 @@ The toc is written between `<!-- toc -->` and `<!-- /toc -->` markers, and only 
   - [Options](#options-1)
   - [Output and exit code](#output-and-exit-code)
   - [Dry run](#dry-run)
-  - [Keep the toc fresh with npm test](#keep-the-toc-fresh-with-npm-test)
   - [With prettier](#with-prettier)
 - [API](#api)
   - [`buildToc(source)`](#buildtocsource)
@@ -124,9 +123,9 @@ becomes
 Both take a summary text, `<!-- toc collapsible="Contents" -->` or `<!-- toc collapsed="Contents" -->`. Any other `name="value"` pair on the start marker is put on the summary element, in the order written:
 
 ```markdown
-<!-- toc collapsed="Contents" class="toc" style="font-weight: bold" -->
+<!-- toc collapsed="Contents" title="Click to expand" style="font-weight: bold" -->
 <details>
-<summary class="toc" style="font-weight: bold">Contents</summary>
+<summary title="Click to expand" style="font-weight: bold">Contents</summary>
 
 - [Install](#install)
 
@@ -134,7 +133,7 @@ Both take a summary text, `<!-- toc collapsible="Contents" -->` or `<!-- toc col
 <!-- /toc -->
 ```
 
-Renderers sanitise html, GitHub for one drops `style`, so check what yours keeps. The start marker itself is kept exactly as written, and spacing inside the comment does not matter.
+Renderers sanitise html, so check what yours keeps. GitHub drops `style`, `class` and `id` but keeps `title`, `dir`, `lang`, `role` and `aria-*` attributes, so in the example above only the `title` survives there. The start marker itself is kept exactly as written, and spacing inside the comment does not matter.
 
 Anything on the start marker that is not one of the two options or a well-formed attribute makes the pair skip with a warning rather than guess: a bare name other than the two options, so a typo like `collapsable` is caught, an unquoted value like `collapsed=yes`, both options at once, or attributes without an option to give them a summary element.
 
@@ -202,25 +201,11 @@ npx toc --dry-run docs/new.md > toc.md
 docs/new.md: no TOC markers, skipped.
 ```
 
-### Keep the toc fresh with npm test
-
-A typical setup regenerates the toc before the tests run and lints afterwards, this README is maintained that way:
-
-```json
-{
-  "scripts": {
-    "pretest": "toc README.md",
-    "test": "mocha",
-    "posttest": "prettier . --check"
-  }
-}
-```
-
 ### With prettier
 
 The generated block is written the way prettier formats markdown, so the two do not fight: `-` bullets, two spaces per nesting level, a blank line before and after the list, and html on lines of its own. Running `prettier --write` over a generated toc changes nothing, and running `toc` over a prettier formatted toc changes nothing either. This README passes both.
 
-Run `toc` before `prettier --check`, as in the scripts above, so a stale toc is regenerated rather than reported as a formatting error. The order does not matter for the content: prettier leaves headings as written, setext underlines and closing hashes included, and it never breaks a line inside a link, so toc entries survive even `proseWrap: "always"`.
+Run `toc` before `prettier --check` so a stale toc is regenerated rather than reported as a formatting error. The order does not matter for the content: prettier leaves headings as written, setext underlines and closing hashes included, and it never breaks a line inside a link, so toc entries survive even `proseWrap: "always"`.
 
 To regenerate the toc and format the rest of the file in one go, let a `posttoc` script run prettier with `--write` after `toc`. Prettier rewrites the prose and leaves the generated block as it is, so a second `toc` run reports the file up to date:
 
