@@ -1,6 +1,6 @@
 # @0dep/toc
 
-[![Build](https://github.com/zerodep/toc/actions/workflows/build.yaml/badge.svg)](https://github.com/zerodep/toc/actions/workflows/build.yaml)
+[![Build](https://github.com/zerodep/toc/actions/workflows/build.yaml/badge.svg)](https://github.com/zerodep/toc/actions/workflows/build.yaml)[![Build (Windows)](https://github.com/zerodep/toc/actions/workflows/build-windows.yaml/badge.svg)](https://github.com/zerodep/toc/actions/workflows/build-windows.yaml)[![Coverage Status](https://coveralls.io/repos/github/zerodep/toc/badge.svg?branch=main)](https://coveralls.io/github/zerodep/toc?branch=main)
 
 Generate a GitHub flavoured table of contents for markdown files. No dependencies, ESM and CommonJS. The library is string in, string out and runs in the browser too, the `toc` bin needs Node 20 or later.
 
