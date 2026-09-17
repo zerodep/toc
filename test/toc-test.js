@@ -1,4 +1,4 @@
-import { buildToc, findMarkers, renderToc } from '@0dep/toc';
+import { buildToc, findAnchors, findMarkers, renderToc } from '@0dep/toc';
 
 const EMPTY_BLOCK = ['<!-- toc -->', '<!-- /toc -->'];
 
@@ -191,6 +191,19 @@ describe('buildToc', () => {
       expect(findMarkers(source)).to.deep.equal([{ start: 2, end: 3, options: { collapsed: true } }]);
       expect(renderToc(source, 2)).to.equal('<!-- toc -->\r\n\r\n- [One](#one)\r\n  - [Two](#two)\r\n\r\n<!-- /toc -->');
     });
+
+    it('ignores a byte order mark, lists what follows it on the first line, and keeps it', () => {
+      const bom = '\uFEFF';
+      const source = `${bom}# Title\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n`;
+      const once = buildToc(source);
+      expect(once).to.equal(`${bom}# Title\n\n<!-- toc -->\n\n- [One](#one)\n\n<!-- /toc -->\n\n## One\n`);
+      expect(buildToc(once)).to.equal(once);
+      expect(renderToc(source)).to.equal('<!-- toc -->\n\n- [Title](#title)\n  - [One](#one)\n\n<!-- /toc -->');
+      expect(findMarkers(`${bom}<!-- toc -->\n<!-- /toc -->\n\n## One\n`)).to.deep.equal([{ start: 0, end: 1, options: {} }]);
+      expect(buildToc(`${bom}<!-- toc -->\n<!-- /toc -->\n\n## One\n`)).to.equal(
+        `${bom}<!-- toc -->\n\n- [One](#one)\n\n<!-- /toc -->\n\n## One\n`,
+      );
+    });
   });
 
   describe('headings', () => {
@@ -249,6 +262,12 @@ describe('buildToc', () => {
       );
     });
 
+    it('numbers duplicate slugs over the whole document, headings above the marker included, like GitHub', () => {
+      const source = doc(['# Options', '', '## Same'], ['', '## Options', '', '## Same', '', '### Options']);
+      expect(buildToc(source)).to.include(['- [Options](#options-1)', '- [Same](#same-1)', '  - [Options](#options-2)'].join('\n'));
+      expect(renderToc(source, 3)).to.include('- [Options](#options-1)');
+    });
+
     it('keeps inline markdown in the label but flattens links', () => {
       const source = doc([], ['', '## Use `code` and **bold** with [a link](http://x.y)']);
       expect(buildToc(source)).to.include('- [Use `code` and **bold** with a link](#use-code-and-bold-with-a-link)');
@@ -293,6 +312,15 @@ describe('renderToc', () => {
   it('is what buildToc puts in the markdown', () => {
     const source = doc(['# Title'], ['', '## One']);
     expect(buildToc(source)).to.include(renderToc(source, 1));
+  });
+});
+
+describe('scan cache', () => {
+  it('reuses the scan of the last source, so the bin walks a file once for all its calls', () => {
+    const source = '# Title\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n\n[x](#one)\n';
+    expect(findMarkers(source)).to.equal(findMarkers(source));
+    expect(findAnchors(source)).to.equal(findAnchors(source));
+    expect(findMarkers(`${source}\n`)).to.not.equal(findMarkers(source));
   });
 });
 

@@ -5,18 +5,17 @@ const TOC_END = '<!-- /toc -->';
 const DEFAULT_SUMMARY = 'Table of contents';
 const KNOWN_OPTIONS = ['collapsible', 'collapsed'];
 const NUL = String.fromCharCode(0);
+/** @type {Map<string, ReturnType<typeof analyse>>} */
+const cache = new Map();
+const LINK = /\[([^\]]*)\]\(#([^)\s]+)/g;
 
 /**
- * Return the markdown with the toc between every `<!-- toc -->` and `<!-- /toc -->` pair regenerated. Each
- * pair lists every heading below its own start marker. A pair is left alone when it is unbalanced, has a
- * problem on its start marker, or has no headings below it, and nothing outside the pairs is ever touched.
- * The start marker line is kept as written, options included.
+ * The markdown with the toc between every `<!-- toc -->` and `<!-- /toc -->` pair regenerated.
  * @param {string} source
  * @returns {string}
  */
 function buildToc(source) {
-  const { lines, eol } = splitLines(source);
-  const { headlines, markers } = scan(lines);
+  const { bom, lines, eol, headlines, markers } = analyse(source);
   /** @type {string[]} */
   const out = [];
   let cursor = 0;
@@ -28,39 +27,42 @@ function buildToc(source) {
     cursor = end + 1;
   }
   out.push(...lines.slice(cursor));
-  return out.join(eol);
+  return bom + out.join(eol);
 }
 
 /**
- * Return the toc block, markers included, for the headings below `fromLine`, by default every heading so the
- * block can be pasted into a document without markers. Returns an empty string when there is nothing to list.
+ * The toc block, markers included, for the headings below `fromLine`, empty when there is nothing to list.
  * @param {string} source
- * @param {number} [fromLine] zero based line number, typically the start marker's
- * @param {TocOptions} [options] rendered into the start marker, e.g. `{ collapsed: 'Contents' }`
+ * @param {number} [fromLine] zero based
+ * @param {TocOptions} [options]
  * @returns {string}
  */
 function renderToc(source, fromLine = -1, options = {}) {
-  const { lines, eol } = splitLines(source);
-  const listed = scan(lines).headlines.filter((h) => h.line > fromLine);
+  const { eol, headlines } = analyse(source);
+  const listed = headlines.filter((h) => h.line > fromLine);
   return listed.length === 0 ? '' : renderBlock(listed, formatMarker(options), options, eol);
 }
 
 /**
- * Every marker pair in document order as zero based line numbers, outside fenced code blocks. A start marker
- * pairs with the first end marker after it. A missing side is -1: a start marker without an end marker, or an
- * end marker with no open start marker before it. `options` holds the recognised options written on the start
- * marker and `problem`, only present when there is one, says why the marker cannot be used.
+ * Every marker pair in document order, shared with later calls for the same source.
  * @param {string} source
  * @returns {Marker[]}
  */
 function findMarkers(source) {
-  return scan(splitLines(source).lines).markers;
+  return analyse(source).markers;
 }
 
 /**
- * Slug a heading's rendered text the way github-slugger does: lowercase, drop everything that is not a
- * letter, number, mark, space, hyphen or underscore, then turn each space into a hyphen. Nothing is trimmed
- * or collapsed.
+ * Every link to an anchor in the document, in order, shared with later calls for the same source.
+ * @param {string} source
+ * @returns {Anchor[]}
+ */
+function findAnchors(source) {
+  return analyse(source).anchors;
+}
+
+/**
+ * The GitHub anchor slug of a heading's rendered text.
  * @param {string} text
  * @returns {string}
  */
@@ -72,7 +74,7 @@ function slugify(text) {
 }
 
 /**
- * Reduce a heading's inline markdown to the text GitHub renders and slugs.
+ * The text GitHub renders for a heading's inline markdown.
  * @param {string} markdown
  * @returns {string}
  */
@@ -87,33 +89,51 @@ function headingText(markdown) {
 }
 
 /**
- * Split the source into lines and remember its line ending, CRLF when the source has any, so the toc is
- * written the way the rest of the file is and a Windows authored file does not end up with mixed endings.
+ * The lines and the scan of the source.
  * @param {string} source
- * @returns {{ lines: string[], eol: string }}
+ * @returns {{ bom: string, lines: string[], eol: string, headlines: Headline[], markers: Marker[], anchors: Anchor[] }}
  */
-function splitLines(source) {
-  return { lines: source.split(/\r?\n/), eol: source.includes('\r\n') ? '\r\n' : '\n' };
+function analyse(source) {
+  let result = cache.get(source);
+  if (!result) {
+    const { bom, lines, eol } = splitLines(source);
+    result = { bom, lines, eol, ...scan(lines) };
+    cache.clear();
+    cache.set(source, result);
+  }
+  return result;
 }
 
 /**
- * Scan the lines for every marker pair and every ATX and setext heading, all outside fenced code blocks. A
- * marker is a line holding nothing but the comment, indented at most three spaces like a heading, since four
- * make an indented code block. A start marker, `<!-- toc -->` with optional options before the closing `-->`,
- * opens a pair that the first end marker after it closes; a start marker inside an open pair is content and an end marker outside a pair is
- * reported with start -1.
+ * The lines of the source, its byte order mark if any, and its line ending.
+ * @param {string} source
+ * @returns {{ bom: string, lines: string[], eol: string }}
+ */
+function splitLines(source) {
+  const bom = source.startsWith('\uFEFF') ? '\uFEFF' : '';
+  return { bom, lines: source.slice(bom.length).split(/\r?\n/), eol: source.includes('\r\n') ? '\r\n' : '\n' };
+}
+
+/**
+ * The headings, marker pairs and anchor links of the lines.
  * @param {string[]} lines
- * @returns {{ headlines: Array<{ line: number, level: number, markdown: string }>, markers: Marker[] }}
+ * @returns {{ headlines: Headline[], markers: Marker[], anchors: Anchor[] }}
  */
 function scan(lines) {
-  /** @type {Array<{ line: number, level: number, markdown: string }>} */
+  /** @type {Headline[]} */
   const headlines = [];
   /** @type {Marker[]} */
   const markers = [];
+  /** @type {Array<{ line: number, text: string, anchor: string }>} */
+  const links = [];
+  /** @type {Set<string>} */
+  const ids = new Set();
   /** @type {{ char: string, length: number } | null} */
   let fence = null;
   /** @type {Marker | null} */
   let open = null;
+  let paragraph = false;
+  let comment = false;
 
   for (const [i, line] of lines.entries()) {
     const fenceMatch = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
@@ -125,8 +145,32 @@ function scan(lines) {
     }
     if (fenceMatch && !(fenceMatch[1][0] === '`' && fenceMatch[2].includes('`'))) {
       fence = { char: fenceMatch[1][0], length: fenceMatch[1].length };
+      paragraph = false;
       continue;
     }
+    if (!paragraph && /^(?: {4}|\t)/.test(line)) continue;
+    paragraph = line.trim() !== '';
+
+    const { text: inline, restore } = protect(line);
+    let visible = inline;
+    if (comment) {
+      const close = visible.indexOf('-->');
+      if (close === -1) continue;
+      visible = visible.slice(close + 3);
+      comment = false;
+    }
+    visible = visible.replace(/<!--[\s\S]*?-->/g, '');
+    const start = visible.indexOf('<!--');
+    if (start !== -1) {
+      visible = visible.slice(0, start);
+      comment = true;
+    }
+    for (const [, tag, attributes] of visible.matchAll(/<([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>/g)) {
+      for (const [, name, quoted, single] of attributes.matchAll(/(?:^|\s)(id|name)=(?:"([^"]*)"|'([^']*)')/g)) {
+        if (name === 'id' || tag.toLowerCase() === 'a') ids.add(quoted ?? single);
+      }
+    }
+    for (const [, text, anchor] of visible.matchAll(LINK)) links.push({ line: i, text: restore(text), anchor: restore(anchor) });
 
     const startMatch = /^ {0,3}<!--\s*toc(?:\s+(.*?))?\s*-->\s*$/.exec(line);
     if (startMatch) {
@@ -142,42 +186,75 @@ function scan(lines) {
 
     const atx = /^ {0,3}(#{1,6})\s+(.+?)\s*$/.exec(line);
     if (atx) {
-      headlines.push({ line: i, level: atx[1].length, markdown: atx[2] });
+      headlines.push({ line: i, level: atx[1].length, markdown: atx[2], slug: '' });
       continue;
     }
 
     const setext = /^ {0,3}(=+|-+)\s*$/.exec(line);
     if (setext && i > 0 && isParagraphText(lines[i - 1])) {
-      headlines.push({ line: i - 1, level: setext[1][0] === '=' ? 1 : 2, markdown: lines[i - 1].trim() });
+      headlines.push({ line: i - 1, level: setext[1][0] === '=' ? 1 : 2, markdown: lines[i - 1].trim(), slug: '' });
     }
   }
-  return { headlines, markers };
+  assignSlugs(headlines);
+  return { headlines, markers, anchors: resolveAnchors(links, headlines, ids) };
 }
 
 /**
- * The toc block for the given headings, wrapped in the given start marker line and the end marker. Indentation
- * is relative to the shallowest level listed so far, so the list never starts indented, which markdown would
- * render flat anyway, and duplicate slugs get github style `-1`, `-2` suffixes. With
- * `collapsible` or `collapsed` the list goes inside a details element, open or closed to start with, blank
- * lines around it so it renders as markdown, and any other attributes from the marker on the summary element.
- * @param {Array<{ level: number, markdown: string }>} headlines
- * @param {string} startLine the start marker as written in the document
- * @param {TocOptions} options
- * @param {string} [eol] line ending, LF by default
+ * @param {Array<{ line: number, text: string, anchor: string }>} links
+ * @param {Headline[]} headlines
+ * @param {Set<string>} ids
+ * @returns {Anchor[]}
  */
-function renderBlock(headlines, startLine, options, eol = '\n') {
+function resolveAnchors(links, headlines, ids) {
+  const targets = new Set([...headlines.map((h) => h.slug), ...ids]);
+  return links.map(({ line, text, anchor }) => {
+    const decoded = decodeAnchor(anchor);
+    if (targets.has(anchor) || targets.has(decoded)) return { line, text, anchor, valid: true };
+    const candidates = new Set([slugify(headingText(decoded)), slugify(headingText(text))].filter((c) => targets.has(c)));
+    if (candidates.size !== 1) return { line, text, anchor, valid: false };
+    return { line, text, anchor, valid: false, suggestion: [...candidates][0] };
+  });
+}
+
+/** @param {string} anchor */
+function decodeAnchor(anchor) {
+  try {
+    return decodeURIComponent(anchor);
+  } catch {
+    return anchor;
+  }
+}
+
+/**
+ * Set the slug of every heading.
+ * @param {Headline[]} headlines
+ */
+function assignSlugs(headlines) {
   /** @type {Record<string, number>} */
   const occurrences = {};
-  let minLevel = Infinity;
-  const tocLines = headlines.map(({ level, markdown }) => {
-    minLevel = Math.min(minLevel, level);
-    const base = slugify(headingText(markdown));
+  for (const headline of headlines) {
+    const base = slugify(headingText(headline.markdown));
     let slug = base;
     while (Object.hasOwn(occurrences, slug)) {
       occurrences[base]++;
       slug = `${base}-${occurrences[base]}`;
     }
     occurrences[slug] = 0;
+    headline.slug = slug;
+  }
+}
+
+/**
+ * The toc block for the headings, between the start marker line and the end marker.
+ * @param {Headline[]} headlines
+ * @param {string} startLine
+ * @param {TocOptions} options
+ * @param {string} [eol]
+ */
+function renderBlock(headlines, startLine, options, eol = '\n') {
+  let minLevel = Infinity;
+  const tocLines = headlines.map(({ level, markdown, slug }) => {
+    minLevel = Math.min(minLevel, level);
     return `${'  '.repeat(level - minLevel)}- [${headingLabel(markdown)}](#${slug})`;
   });
   const details = options.collapsible ?? options.collapsed;
@@ -191,10 +268,7 @@ function renderBlock(headlines, startLine, options, eol = '\n') {
 }
 
 /**
- * Parse what is written on a start marker: the options as bare names (`collapsed`) or quoted values
- * (`collapsed="Contents"`), and any other well-formed `name="value"` as an attribute for the summary element.
- * Anything else, bare names that are not options, unquoted values, malformed names, is a problem, as is a
- * combination that makes no sense. A marker with a problem is never used.
+ * The options written on a start marker, with a problem when they cannot be used.
  * @param {string | undefined} text
  * @returns {{ options: TocOptions, problem?: string }}
  */
@@ -223,7 +297,7 @@ function parseOptions(text) {
 }
 
 /**
- * The start marker line for the given options, the inverse of `parseOptions`: options first, then attributes.
+ * The start marker line for the options.
  * @param {TocOptions} options
  */
 function formatMarker(options) {
@@ -237,15 +311,14 @@ function formatMarker(options) {
 
 /**
  * @param {Record<string, string>} attributes
- * @returns {string[]} `name="value"` in the order given
+ * @returns {string[]}
  */
 function formatAttributes(attributes) {
   return Object.entries(attributes).map(([name, value]) => `${name}="${value}"`);
 }
 
 /**
- * The label used in the toc: the heading's own markdown, except that links become their text since a link
- * cannot nest inside the toc link.
+ * The link text used in the toc for a heading.
  * @param {string} markdown
  * @returns {string}
  */
@@ -255,8 +328,7 @@ function headingLabel(markdown) {
 }
 
 /**
- * Replace code spans (with their content, or the whole span when `keepCodeSpans` is set) and backslash escapes
- * (with the escaped character) by placeholders so the inline markdown passes leave them alone.
+ * The markdown with code spans and backslash escapes swapped for placeholders, and a function to put them back.
  * @param {string} markdown
  * @param {{ keepCodeSpans?: boolean }} [options]
  */
@@ -276,8 +348,7 @@ function protect(markdown, { keepCodeSpans = false } = {}) {
 }
 
 /**
- * Strip one leading and one trailing space from code span content when both are present and the content is
- * not only spaces, as CommonMark does.
+ * The code span content unpadded as CommonMark renders it.
  * @param {string} code
  */
 function unpadCodeSpan(code) {
@@ -291,8 +362,7 @@ function stripClosingHashes(markdown) {
 }
 
 /**
- * Links, images and reference links become their text, autolinks their url. Used for both the slug text and
- * the toc label since a link cannot nest inside the toc link.
+ * The text with links, images and autolinks flattened to their text or url.
  * @param {string} text
  */
 function stripLinks(text) {
@@ -310,22 +380,30 @@ function isParagraphText(line) {
 }
 
 /**
- * Options written on a start marker. `collapsible` wraps the list in a details element that starts open,
- * `collapsed` in one that starts closed. Each is `true` for the default summary "Table of contents" or a
- * string for a custom one. `attributes` are the other `name="value"` pairs on the marker, rendered on the
- * summary element in the order written, only present when there are any.
+ * Options written on a start marker, each `true` or a summary text, and the other attributes for the summary element.
  * @typedef {{ collapsible?: true | string, collapsed?: true | string, attributes?: Record<string, string> }} TocOptions
  */
 
 /**
- * A marker pair. `start` and `end` are zero based line numbers, -1 when that side is missing. `problem` is
- * only present when the start marker cannot be used: an unknown option or an impossible combination.
+ * A heading with its zero based line, level, inline markdown and GitHub slug.
+ * @typedef {{ line: number, level: number, markdown: string, slug: string }} Headline
+ */
+
+/**
+ * A link to an anchor with its zero based line, text, anchor as written, whether it has a target and, when it
+ * has none and one heading clearly matches, a suggestion.
+ * @typedef {{ line: number, text: string, anchor: string, valid: boolean, suggestion?: string }} Anchor
+ */
+
+/**
+ * A marker pair as zero based lines, -1 for a missing side, with its options and a problem when they cannot be used.
  * @typedef {{ start: number, end: number, options: TocOptions, problem?: string }} Marker
  */
 
 exports.TOC_END = TOC_END;
 exports.TOC_START = TOC_START;
 exports.buildToc = buildToc;
+exports.findAnchors = findAnchors;
 exports.findMarkers = findMarkers;
 exports.headingText = headingText;
 exports.renderToc = renderToc;

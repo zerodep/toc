@@ -4,7 +4,7 @@
 
 Generate a GitHub flavoured table of contents for markdown files. No dependencies, ESM and CommonJS. The library is string in, string out and runs in the browser too, the `toc` bin needs Node 20 or later.
 
-The toc is written between `<!-- toc -->` and `<!-- /toc -->` markers, and only there. Nothing outside the markers is ever touched, nothing is inserted or guessed. Slugs match GitHub's anchors.
+The toc is written between `<!-- toc -->` and `<!-- /toc -->` markers, and only there. Nothing outside the markers is ever touched, nothing is inserted or guessed. Slugs match GitHub's anchors, and every link to an anchor in the document is checked against them.
 
 <!-- toc -->
 
@@ -16,12 +16,14 @@ The toc is written between `<!-- toc -->` and `<!-- /toc -->` markers, and only 
 - [CLI](#cli)
   - [Options](#options-1)
   - [Output and exit code](#output-and-exit-code)
+  - [Anchors](#anchors)
   - [Dry run](#dry-run)
   - [With prettier](#with-prettier)
 - [API](#api)
   - [`buildToc(source)`](#buildtocsource)
   - [`renderToc(source[, fromLine[, options]])`](#rendertocsource-fromline-options)
   - [`findMarkers(source)`](#findmarkerssource)
+  - [`findAnchors(source)`](#findanchorssource)
   - [`slugify(text)`](#slugifytext)
   - [`headingText(markdown)`](#headingtextmarkdown)
   - [`TOC_START` and `TOC_END`](#toc_start-and-toc_end)
@@ -71,7 +73,7 @@ becomes
 ## Usage
 ```
 
-Running it again replaces whatever is between the markers with a fresh list, so the toc can be regenerated any number of times. A file with CRLF line endings keeps them, the toc is written with the same line ending as the rest of the file.
+Running it again replaces whatever is between the markers with a fresh list, so the toc can be regenerated any number of times. A file with CRLF line endings keeps them, the toc is written with the same line ending as the rest of the file. A byte order mark is ignored, a heading or marker on the first line is still seen, and the mark is kept when the file is written.
 
 ### Several tocs in one document
 
@@ -149,7 +151,7 @@ Anything on the start marker that is not one of the two options or a well-formed
 
 A start marker pairs with the first end marker after it, a second start marker inside an open pair is treated as content and replaced with the rest of the block. The CLI reports every skipped file and pair with a warning, see below.
 
-This README has two headings named Options, the one above and the one under CLI. The second one is linked as `#options-1`, the way GitHub numbers duplicate anchors.
+This README has two headings named Options, the one above and the one under CLI. The second one is linked as `#options-1`, the way GitHub numbers duplicate anchors. Duplicates are counted over the whole document, headings above the start marker included, since that is what GitHub does.
 
 ## CLI
 
@@ -158,6 +160,7 @@ npx toc                        # updates README.md in the current directory
 npx toc docs/a.md docs/b.md    # several files
 npx toc docs/a.md,docs/b.md    # comma separated works too
 npx toc --dry-run README.md    # print the toc, write nothing
+npx toc --check README.md      # exit with 1 when a link to an anchor has no target
 npx toc --help
 ```
 
@@ -168,6 +171,7 @@ Paths are resolved against the current directory.
 | Option          | Effect                                                                        |
 | --------------- | ----------------------------------------------------------------------------- |
 | `-n, --dry-run` | Print the toc of every pair to stdout and the status to stderr, write nothing |
+| `-c, --check`   | Exit with 1 when a link to an anchor has no target                            |
 | `-h, --help`    | Show usage                                                                    |
 
 ### Output and exit code
@@ -185,9 +189,21 @@ One status line per file on stdout, and one warning per skipped file or pair on 
 | `README.md:3: unknown TOC option foo, skipped.`                                   | stderr | The start marker has something that is not an option |
 | `README.md:3: TOC options collapsible and collapsed exclude each other, skipped.` | stderr | Pick one                                             |
 | `README.md:3: TOC attributes style need collapsible or collapsed, skipped.`       | stderr | There is no summary element to put them on           |
+| `README.md:9: anchor #instal has no target.`                                      | stderr | A link points at a heading that does not exist       |
+| `README.md:9: anchor #Install has no target, did you mean #install?`              | stderr | Same, and a heading obviously matches                |
 | `README.md: ENOENT: no such file or directory, ...`                               | stderr | The file could not be read or written                |
 
-The exit code is 1 when a file could not be read or written or when an option is not recognised, otherwise 0. Skipped files and pairs do not affect the exit code.
+The exit code is 1 when a file could not be read or written, when an option is not recognised, or, with `--check`, when a link to an anchor has no target. Otherwise 0. Skipped files and pairs do not affect the exit code.
+
+### Anchors
+
+Every link to an anchor in the file, `[text](#slug)`, is checked against the slugs of the headings, the `id` of any html element and the `name` of an `<a>` in the file, outside fenced and indented code blocks, code spans and html comments. A bare `#`, the top of the page, and a fragment on a path or url to another document, `other.md#install`, are not anchors in this file and are left alone. Links inside a pair that is being regenerated are not checked, the new toc replaces them. A link without a target is reported with its line number, and the exit code stays 0 unless `--check` is given, so a stale link does not stop the toc from being written.
+
+The warning ends with `did you mean` when the target is obvious: slugging the anchor as written, `#My-Heading` or `#My%20Heading` for `## My Heading`, or slugging the link text, `[My Heading](#heading)`, lands on exactly one existing target. The link itself is never rewritten, nothing outside the markers is.
+
+```sh
+npx toc --check docs/*.md
+```
 
 ### Dry run
 
@@ -227,6 +243,7 @@ To regenerate the toc and format the rest of the file in one go, let a `posttoc`
 - [`buildToc(source)`](#buildtocsource)
 - [`renderToc(source[, fromLine[, options]])`](#rendertocsource-fromline-options)
 - [`findMarkers(source)`](#findmarkerssource)
+- [`findAnchors(source)`](#findanchorssource)
 - [`slugify(text)`](#slugifytext)
 - [`headingText(markdown)`](#headingtextmarkdown)
 - [`TOC_START` and `TOC_END`](#toc_start-and-toc_end)
@@ -240,7 +257,7 @@ To regenerate the toc and format the rest of the file in one go, let a `posttoc`
 <!-- /toc -->
 
 ```javascript
-import { buildToc, renderToc, findMarkers, slugify, headingText, TOC_START, TOC_END } from '@0dep/toc';
+import { buildToc, renderToc, findMarkers, findAnchors, slugify, headingText, TOC_START, TOC_END } from '@0dep/toc';
 ```
 
 CommonJS works the same way with `require('@0dep/toc')`.
@@ -308,9 +325,27 @@ console.log(findMarkers('# Title\n\n<!-- toc collapsed -->\n<!-- /toc -->\n\n## 
 ]
 ```
 
+### `findAnchors(source)`
+
+Returns every link to an anchor in document order as `{ line, text, anchor, valid }`: the zero based line, the link text, the anchor without the `#` and with backslash escapes resolved, and whether the document has a heading slug, an html `id` or an `<a name>` for it. Links and targets inside fenced and indented code blocks, code spans and html comments are ignored. When there is no target and exactly one heading matches the slugged anchor or the slugged link text, `suggestion` names it, and is otherwise absent.
+
+```javascript
+import { findAnchors } from '@0dep/toc';
+
+console.log(findAnchors('## My Heading\n\n[a](#my-heading) [b](#My-Heading) [c](#nope)\n'));
+```
+
+```text
+[
+  { line: 2, text: 'a', anchor: 'my-heading', valid: true },
+  { line: 2, text: 'b', anchor: 'My-Heading', valid: false, suggestion: 'my-heading' },
+  { line: 2, text: 'c', anchor: 'nope', valid: false }
+]
+```
+
 ### `slugify(text)`
 
-The github-slugger algorithm: lowercase, drop everything that is not a letter, number, mark, space, hyphen or underscore, then turn spaces into hyphens. Nothing is trimmed or collapsed. Duplicate slugs in one toc get `-1`, `-2` and so on, like GitHub.
+The github-slugger algorithm: lowercase, drop everything that is not a letter, number, mark, space, hyphen or underscore, then turn spaces into hyphens. Nothing is trimmed or collapsed. Duplicate slugs get `-1`, `-2` and so on, counted over the whole document, like GitHub.
 
 ```javascript
 import { slugify } from '@0dep/toc';
@@ -370,7 +405,7 @@ The link text is the heading's own markdown, so inline code and emphasis are kep
 
 ### Slugs
 
-Slugs are built from the rendered heading text with the same algorithm as GitHub, so the anchors work on github.com and in every renderer that follows it. See `slugify` and `headingText` above.
+Slugs are built from the rendered heading text with the same algorithm as GitHub, so the anchors work on github.com and in every renderer that follows it. Duplicates are numbered over the whole document, headings above the markers included. See `slugify` and `headingText` above.
 
 ## License
 

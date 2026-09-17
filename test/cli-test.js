@@ -38,6 +38,15 @@ describe('bin/toc.js', () => {
     expect(stdout).to.equal('README.md: TOC already up to date.\n');
   });
 
+  it('writes a file with a byte order mark back with the mark and its first heading listed', async () => {
+    await writeFile(join(dir, 'README.md'), '\uFEFF<!-- toc -->\n<!-- /toc -->\n\n# Title\n\n## One\n');
+    const { stdout } = await toc();
+    expect(stdout).to.equal('README.md: wrote TOC.\n');
+    expect(await readFile(join(dir, 'README.md'), 'utf8')).to.equal(
+      '\uFEFF<!-- toc -->\n\n- [Title](#title)\n  - [One](#one)\n\n<!-- /toc -->\n\n# Title\n\n## One\n',
+    );
+  });
+
   it('takes several files, as arguments or comma separated', async () => {
     await writeFile(join(dir, 'a.md'), '# A\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n');
     await writeFile(join(dir, 'b.md'), '# B\n\n<!-- toc -->\n<!-- /toc -->\n\n## Two\n');
@@ -95,7 +104,7 @@ describe('bin/toc.js', () => {
     await writeFile(join(dir, 'a.md'), original);
     const { stdout, stderr } = await toc('a.md');
     expect(stdout).to.equal('');
-    expect(stderr).to.equal('a.md:3: no headings below TOC start marker, skipped.\n');
+    expect(stderr).to.equal('a.md:3: no headings below TOC start marker, skipped.\na.md:4: anchor #stale has no target.\n');
     expect(await readFile(join(dir, 'a.md'), 'utf8')).to.equal(original);
   });
 
@@ -176,6 +185,51 @@ describe('bin/toc.js', () => {
     const { stdout, stderr } = await toc('-n', 'a.md');
     expect(stdout).to.equal('');
     expect(stderr).to.equal('a.md:3: no headings below TOC start marker, skipped.\n');
+  });
+
+  describe('anchors', () => {
+    it('warns about a link without a target, with the line number, and still exits 0', async () => {
+      const original = '# Title\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n\nSee [two](#two) and [One](#one).\n';
+      await writeFile(join(dir, 'a.md'), original);
+      const { stdout, stderr } = await toc('a.md');
+      expect(stdout).to.equal('a.md: wrote TOC.\n');
+      expect(stderr).to.equal('a.md:8: anchor #two has no target.\n');
+    });
+
+    it('suggests the target when there is an obvious one', async () => {
+      await writeFile(join(dir, 'a.md'), '# Title\n\n## My Heading\n\nSee [x](#My-Heading) and [My Heading](#heading).\n');
+      const { stderr } = await toc('a.md');
+      expect(stderr).to.equal(
+        'a.md: no TOC markers, skipped.\na.md:5: anchor #My-Heading has no target, did you mean #my-heading?\na.md:5: anchor #heading has no target, did you mean #my-heading?\n',
+      );
+    });
+
+    it('checks the links after the toc is regenerated, so a stale toc is not reported', async () => {
+      await writeFile(join(dir, 'a.md'), '# Title\n\n<!-- toc -->\n\n- [Stale](#stale)\n\n<!-- /toc -->\n\n## Fresh\n');
+      const { stderr } = await toc('-n', 'a.md');
+      expect(stderr).to.equal('a.md: would write TOC.\n');
+    });
+
+    it('--check sets exit code 1 when a link has no target', async () => {
+      await writeFile(join(dir, 'a.md'), '# Title\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n\n[two](#two)\n');
+      await writeFile(join(dir, 'b.md'), '# Title\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n\n[one](#one)\n');
+      const err = await toc('--check', 'a.md', 'b.md').catch((e) => e);
+      expect(err.code).to.equal(1);
+      expect(err.stdout).to.equal('a.md: wrote TOC.\nb.md: wrote TOC.\n');
+      expect(err.stderr).to.equal('a.md:8: anchor #two has no target.\n');
+      const { stdout } = await toc('-c', 'b.md');
+      expect(stdout).to.equal('b.md: TOC already up to date.\n');
+    });
+
+    it('--check with --dry-run still exits 1 and writes nothing', async () => {
+      const original = '# Title\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n\n[two](#two)\n';
+      await writeFile(join(dir, 'a.md'), original);
+      const err = await toc('-n', '-c', 'a.md').catch((e) => e);
+      expect(err.code).to.equal(1);
+      expect(err.stdout).to.equal('<!-- toc -->\n\n- [One](#one)\n\n<!-- /toc -->\n');
+      expect(err.stderr).to.equal('a.md: would write TOC.\na.md:8: anchor #two has no target.\n');
+      expect(await readFile(join(dir, 'a.md'), 'utf8')).to.equal(original);
+    });
   });
 
   it('--help prints usage and exits 0', async () => {

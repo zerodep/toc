@@ -9,6 +9,7 @@ describe('package', () => {
       'TOC_END',
       'TOC_START',
       'buildToc',
+      'findAnchors',
       'findMarkers',
       'headingText',
       'renderToc',
