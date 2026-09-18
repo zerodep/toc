@@ -1,36 +1,34 @@
 {
   "name": "@0dep/toc",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Generate a GitHub flavoured markdown table of contents",
   "type": "module",
   "sideEffects": false,
   "module": "./index.js",
-  "main": "./index.cjs",
   "types": "./types/index.d.ts",
   "exports": {
     ".": {
       "types": "./types/index.d.ts",
-      "require": "./index.cjs",
-      "import": "./index.js"
+      "default": "./index.js"
     }
   },
   "bin": {
     "toc": "bin/toc.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "scripts": {
-    "pretest": "npm run toc && npm run dist",
+    "pretest": "npm run toc && npm run types",
     "test": "mocha",
     "posttest": "npm run lint && npm run tsc && npm run test:md",
     "test:md": "texample",
-    "toc": "node bin/toc.js --check README.md",
-    "posttoc": "prettier --write README.md",
+    "toc": "node bin/toc.js --check README.md CHANGELOG.md",
+    "posttoc": "prettier --write README.md CHANGELOG.md",
     "lint": "eslint . --cache && prettier . --check --cache",
     "tsc": "tsc -p test",
-    "dist": "rollup -c && dts-buddy",
-    "prepack": "npm run dist",
+    "types": "tsc",
+    "prepack": "npm run types",
     "cov:html": "c8 -r html -r text mocha",
     "test:lcov": "c8 -r lcov mocha && npm run lint"
   },
@@ -46,7 +44,8 @@
     "markdown",
     "readme",
     "github",
-    "slug"
+    "slug",
+    "glob"
   ],
   "author": {
     "name": "Zerodep AB",
@@ -63,26 +62,22 @@
   "license": "MIT",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@rollup/plugin-commonjs": "^29.0.3",
     "@types/chai": "^5.2.3",
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.20.2",
     "c8": "^12.0.0",
     "chai": "^6.2.2",
-    "dts-buddy": "^0.8.3",
     "eslint": "^10.10.0",
     "globals": "^17.12.0",
     "mocha": "^12.0.0",
     "prettier": "^3.9.6",
-    "rollup": "^4.63.1",
     "texample": "^1.0.2",
     "typescript": "^6.0.3"
   },
   "files": [
     "bin/",
     "index.js",
-    "index.cjs",
-    "types/index.d.ts*",
+    "types/",
     "CHANGELOG.md"
   ]
 }

@@ -1,7 +1,8 @@
 export const TOC_START = '<!-- toc -->';
 export const TOC_END = '<!-- /toc -->';
 const DEFAULT_SUMMARY = 'Table of contents';
-const KNOWN_OPTIONS = ['collapsible', 'collapsed'];
+const KNOWN_OPTIONS = ['collapsible', 'collapsed', 'levels'];
+const LEVELS = /^(?:([1-6])|([1-6])-([1-6])|([1-6])-|-([1-6]))$/;
 const NUL = String.fromCharCode(0);
 /** @type {Map<string, ReturnType<typeof analyse>>} */
 const cache = new Map();
@@ -19,7 +20,7 @@ export function buildToc(source) {
   let cursor = 0;
   for (const { start, end, options, problem } of markers) {
     if (start === -1 || end === -1 || problem) continue;
-    const listed = headlines.filter((h) => h.line > start);
+    const listed = headingsBelow(headlines, start, options);
     if (listed.length === 0) continue;
     out.push(...lines.slice(cursor, start), renderBlock(listed, lines[start], options, eol));
     cursor = end + 1;
@@ -37,7 +38,7 @@ export function buildToc(source) {
  */
 export function renderToc(source, fromLine = -1, options = {}) {
   const { eol, headlines } = analyse(source);
-  const listed = headlines.filter((h) => h.line > fromLine);
+  const listed = headingsBelow(headlines, fromLine, options);
   return listed.length === 0 ? '' : renderBlock(listed, formatMarker(options), options, eol);
 }
 
@@ -243,6 +244,33 @@ function assignSlugs(headlines) {
 }
 
 /**
+ * The headings after `fromLine` within the levels the options allow.
+ * @param {Headline[]} headlines
+ * @param {number} fromLine
+ * @param {TocOptions} options
+ * @returns {Headline[]}
+ */
+function headingsBelow(headlines, fromLine, options) {
+  const [min, max] = levelRange(options.levels) ?? [1, 6];
+  return headlines.filter((h) => h.line > fromLine && h.level >= min && h.level <= max);
+}
+
+/**
+ * The lowest and highest heading level a levels option allows, every level when absent, undefined when broken.
+ * @param {string} [levels]
+ * @returns {[number, number] | undefined}
+ */
+function levelRange(levels) {
+  if (levels === undefined) return [1, 6];
+  const match = LEVELS.exec(levels);
+  if (!match) return undefined;
+  const [, only, from, to, fromOpen, toOpen] = match;
+  const min = Number(only ?? from ?? fromOpen ?? 1);
+  const max = Number(only ?? to ?? toOpen ?? 6);
+  return min <= max ? [min, max] : undefined;
+}
+
+/**
  * The toc block for the headings, between the start marker line and the end marker.
  * @param {Headline[]} headlines
  * @param {string} startLine
@@ -266,9 +294,9 @@ function renderBlock(headlines, startLine, options, eol = '\n') {
 }
 
 /**
- * The options written on a start marker, with a problem when they cannot be used.
+ * The options written on a start marker, with a problem when they cannot be used and a warning when one is ignored.
  * @param {string | undefined} text
- * @returns {{ options: TocOptions, problem?: string }}
+ * @returns {{ options: TocOptions, problem?: string, warning?: string }}
  */
 function parseOptions(text) {
   /** @type {TocOptions} */
@@ -278,20 +306,25 @@ function parseOptions(text) {
   /** @type {string[]} */
   const unknown = [];
   for (const [token, name, value] of (text ?? '').matchAll(/([^\s="]+)(?:="([^"]*)")?(?=\s|$)|\S+/g)) {
-    if (name && KNOWN_OPTIONS.includes(name)) options[/** @type {'collapsible' | 'collapsed'} */ (name)] = value ?? true;
+    if (name === 'levels') options.levels = value ?? '';
+    else if (name && KNOWN_OPTIONS.includes(name)) options[/** @type {'collapsible' | 'collapsed'} */ (name)] = value ?? true;
     else if (name && value !== undefined && /^[a-zA-Z][\w:.-]*$/.test(name)) attributes[name] = value;
     else unknown.push(token);
   }
   const names = Object.keys(attributes);
   if (names.length) options.attributes = attributes;
-  if (unknown.length) return { options, problem: `unknown TOC option ${unknown.join(' ')}` };
-  if (options.collapsible !== undefined && options.collapsed !== undefined) {
-    return { options, problem: 'TOC options collapsible and collapsed exclude each other' };
+  /** @type {{ options: TocOptions, problem?: string, warning?: string }} */
+  const parsed = { options };
+  if (options.levels !== undefined && !levelRange(options.levels)) {
+    parsed.warning = `TOC option levels "${options.levels}" is not a level or a range like 2-3, ignored`;
   }
-  if (names.length && options.collapsible === undefined && options.collapsed === undefined) {
-    return { options, problem: `TOC attributes ${names.join(', ')} need collapsible or collapsed` };
+  if (unknown.length) parsed.problem = `unknown TOC option ${unknown.join(' ')}`;
+  else if (options.collapsible !== undefined && options.collapsed !== undefined) {
+    parsed.problem = 'TOC options collapsible and collapsed exclude each other';
+  } else if (names.length && options.collapsible === undefined && options.collapsed === undefined) {
+    parsed.problem = `TOC attributes ${names.join(', ')} need collapsible or collapsed`;
   }
-  return { options };
+  return parsed;
 }
 
 /**
@@ -379,7 +412,7 @@ function isParagraphText(line) {
 
 /**
  * Options written on a start marker, each `true` or a summary text, and the other attributes for the summary element.
- * @typedef {{ collapsible?: true | string, collapsed?: true | string, attributes?: Record<string, string> }} TocOptions
+ * @typedef {{ collapsible?: true | string, collapsed?: true | string, levels?: string, attributes?: Record<string, string> }} TocOptions
  */
 
 /**
@@ -394,6 +427,6 @@ function isParagraphText(line) {
  */
 
 /**
- * A marker pair as zero based lines, -1 for a missing side, with its options and a problem when they cannot be used.
- * @typedef {{ start: number, end: number, options: TocOptions, problem?: string }} Marker
+ * A marker pair as zero based lines, -1 for a missing side, with its options, a problem when they cannot be used and a warning when one is ignored.
+ * @typedef {{ start: number, end: number, options: TocOptions, problem?: string, warning?: string }} Marker
  */

@@ -391,6 +391,33 @@ describe('findMarkers', () => {
     ]);
   });
 
+  it('parses levels as a level or a range and refuses anything else', () => {
+    for (const levels of ['2', '2-3', '-3', '3-', '1-6']) {
+      expect(findMarkers(`<!-- toc levels="${levels}" -->\n<!-- /toc -->\n`)).to.deep.equal([{ start: 0, end: 1, options: { levels } }]);
+    }
+    expect(findMarkers('<!-- toc levels="2" collapsed="Versions" -->\n<!-- /toc -->\n')).to.deep.equal([
+      { start: 0, end: 1, options: { levels: '2', collapsed: 'Versions' } },
+    ]);
+    for (const [marker, levels] of [
+      ['levels', ''],
+      ['levels=""', ''],
+      ['levels="x"', 'x'],
+      ['levels="0"', '0'],
+      ['levels="7"', '7'],
+      ['levels="3-2"', '3-2'],
+      ['levels="2,3"', '2,3'],
+      ['levels="-"', '-'],
+    ]) {
+      expect(findMarkers(`<!-- toc ${marker} -->\n<!-- /toc -->\n`), marker).to.deep.equal([
+        { start: 0, end: 1, options: { levels }, warning: `TOC option levels "${levels}" is not a level or a range like 2-3, ignored` },
+      ]);
+    }
+    expect(findMarkers('<!-- toc levels="x" foo -->\n<!-- /toc -->\n')[0]).to.include({
+      problem: 'unknown TOC option foo',
+      warning: 'TOC option levels "x" is not a level or a range like 2-3, ignored',
+    });
+  });
+
   it('collects other well-formed attributes for the summary element, in order', () => {
     expect(findMarkers('<!-- toc collapsed="Jump to" style="font-weight: bold" data-x="1" -->\n<!-- /toc -->\n')).to.deep.equal([
       { start: 0, end: 1, options: { collapsed: 'Jump to', attributes: { style: 'font-weight: bold', 'data-x': '1' } } },
@@ -432,6 +459,108 @@ describe('findMarkers', () => {
     expect(findMarkers('<!-- tocs -->\n<!-- toc: -->\n<!-- toc --> trailing\n<!-- /toc -->\n')).to.deep.equal([
       { start: -1, end: 3, options: {} },
     ]);
+  });
+});
+
+describe('levels', () => {
+  const changelog = [
+    '# Changelog',
+    '',
+    '<!-- toc levels="2" -->',
+    '<!-- /toc -->',
+    '',
+    '## v2.0.0',
+    '',
+    '### Breaking',
+    '',
+    '#### Node',
+    '',
+    '### Added',
+    '',
+    '## v1.1.0',
+    '',
+    '### Added',
+    '',
+  ].join('\n');
+
+  it('lists only the headings in the level, so a changelog toc has the versions alone', () => {
+    const once = buildToc(changelog);
+    expect(once).to.equal(
+      changelog.replace('<!-- toc levels="2" -->\n', '<!-- toc levels="2" -->\n\n- [v2.0.0](#v200)\n- [v1.1.0](#v110)\n\n'),
+    );
+    expect(buildToc(once)).to.equal(once);
+  });
+
+  it('nests a range from its shallowest level and starts the list flat', () => {
+    expect(renderToc(changelog, 3, { levels: '2-3' })).to.equal(
+      [
+        '<!-- toc levels="2-3" -->',
+        '',
+        '- [v2.0.0](#v200)',
+        '  - [Breaking](#breaking)',
+        '  - [Added](#added)',
+        '- [v1.1.0](#v110)',
+        '  - [Added](#added-1)',
+        '',
+        '<!-- /toc -->',
+      ].join('\n'),
+    );
+    expect(renderToc(changelog, 3, { levels: '3' })).to.equal(
+      ['<!-- toc levels="3" -->', '', '- [Breaking](#breaking)', '- [Added](#added)', '- [Added](#added-1)', '', '<!-- /toc -->'].join(
+        '\n',
+      ),
+    );
+  });
+
+  it('takes an open range on either side', () => {
+    expect(renderToc(changelog, -1, { levels: '-2' })).to.equal(
+      ['<!-- toc levels="-2" -->', '', '- [Changelog](#changelog)', '  - [v2.0.0](#v200)', '  - [v1.1.0](#v110)', '', '<!-- /toc -->'].join(
+        '\n',
+      ),
+    );
+    expect(renderToc(changelog, -1, { levels: '3-' })).to.equal(
+      [
+        '<!-- toc levels="3-" -->',
+        '',
+        '- [Breaking](#breaking)',
+        '  - [Node](#node)',
+        '- [Added](#added)',
+        '- [Added](#added-1)',
+        '',
+        '<!-- /toc -->',
+      ].join('\n'),
+    );
+  });
+
+  it('combines with collapsed and leaves a pair alone when no heading is in the range', () => {
+    expect(renderToc(changelog, -1, { levels: '2', collapsed: 'Versions' })).to.equal(
+      [
+        '<!-- toc levels="2" collapsed="Versions" -->',
+        '<details>',
+        '<summary>Versions</summary>',
+        '',
+        '- [v2.0.0](#v200)',
+        '- [v1.1.0](#v110)',
+        '',
+        '</details>',
+        '<!-- /toc -->',
+      ].join('\n'),
+    );
+    expect(renderToc(changelog, -1, { levels: '5-6' })).to.equal('');
+    const source = ['<!-- toc levels="5" -->', 'kept', '<!-- /toc -->', '', '## One', ''].join('\n');
+    expect(buildToc(source)).to.equal(source);
+  });
+
+  it('ignores a broken value, lists every level and keeps the marker as written', () => {
+    const source = ['<!-- toc levels="x" -->', '<!-- /toc -->', '', '## One', '', '### Two', ''].join('\n');
+    const once = buildToc(source);
+    expect(once).to.equal(
+      ['<!-- toc levels="x" -->', '', '- [One](#one)', '  - [Two](#two)', '', '<!-- /toc -->', '', '## One', '', '### Two', ''].join('\n'),
+    );
+    expect(buildToc(once)).to.equal(once);
+    expect(renderToc(source, -1, { levels: '7' })).to.equal(
+      ['<!-- toc levels="7" -->', '', '- [One](#one)', '  - [Two](#two)', '', '<!-- /toc -->'].join('\n'),
+    );
   });
 });
 

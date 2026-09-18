@@ -2,7 +2,7 @@
 
 [![Build](https://github.com/zerodep/toc/actions/workflows/build.yaml/badge.svg)](https://github.com/zerodep/toc/actions/workflows/build.yaml)[![Build (Windows)](https://github.com/zerodep/toc/actions/workflows/build-windows.yaml/badge.svg)](https://github.com/zerodep/toc/actions/workflows/build-windows.yaml)[![Coverage Status](https://coveralls.io/repos/github/zerodep/toc/badge.svg?branch=main)](https://coveralls.io/github/zerodep/toc?branch=main)
 
-Generate a GitHub flavoured table of contents for markdown files. No dependencies, ESM and CommonJS. The library is string in, string out and runs in the browser too, the `toc` bin needs Node 20 or later.
+Generate a GitHub flavoured table of contents for markdown files. No dependencies. The library is string in, string out and runs in the browser too. Node 22.12 or later for the `toc` bin and for `require`.
 
 The toc is written between `<!-- toc -->` and `<!-- /toc -->` markers, and only there. Nothing outside the markers is ever touched, nothing is inserted or guessed. Slugs match GitHub's anchors, and every link to an anchor in the document is checked against them.
 
@@ -12,6 +12,9 @@ The toc is written between `<!-- toc -->` and `<!-- /toc -->` markers, and only 
 - [Markers](#markers)
   - [Several tocs in one document](#several-tocs-in-one-document)
   - [Options](#options)
+    - [`collapsible` and `collapsed`](#collapsible-and-collapsed)
+    - [Summary attributes](#summary-attributes)
+    - [`levels`](#levels)
   - [What is left alone](#what-is-left-alone)
 - [CLI](#cli)
   - [Options](#options-1)
@@ -101,6 +104,18 @@ The top toc lists API, get, set and License. The toc under API lists get, set an
 
 ### Options
 
+The start marker takes options, bare or as `name="value"`, in any order. It is kept exactly as written, and spacing inside the comment does not matter. Anything on it that is not one of the three options or a well-formed attribute makes the pair skip with a warning rather than guess: a bare name other than the options, so a typo like `collapsable` is caught, an unquoted value like `collapsed=yes`, both details options at once, or attributes without an option to give them a summary element.
+
+<!-- toc levels="4" -->
+
+- [`collapsible` and `collapsed`](#collapsible-and-collapsed)
+- [Summary attributes](#summary-attributes)
+- [`levels`](#levels)
+
+<!-- /toc -->
+
+#### `collapsible` and `collapsed`
+
 GitHub and most other renderers support the html details element in markdown. Ask for it on the start marker and the list is wrapped in one. `collapsible` starts open and can be folded away, `collapsed` starts folded until the reader clicks the summary. This README has a `collapsed` one under [API](#api) and a `collapsible` one under [Headings](#headings).
 
 ```markdown
@@ -122,7 +137,11 @@ becomes
 <!-- /toc -->
 ```
 
-Both take a summary text, `<!-- toc collapsible="Contents" -->` or `<!-- toc collapsed="Contents" -->`. Any other `name="value"` pair on the start marker is put on the summary element, in the order written:
+Both take a summary text, `<!-- toc collapsible="Contents" -->` or `<!-- toc collapsed="Contents" -->`.
+
+#### Summary attributes
+
+Any other `name="value"` pair on the start marker is put on the summary element, in the order written:
 
 ```markdown
 <!-- toc collapsed="Contents" title="Click to expand" style="font-weight: bold" -->
@@ -135,9 +154,29 @@ Both take a summary text, `<!-- toc collapsible="Contents" -->` or `<!-- toc col
 <!-- /toc -->
 ```
 
-Renderers sanitise html, so check what yours keeps. GitHub drops `style`, `class` and `id` but keeps `title`, `dir`, `lang`, `role` and `aria-*` attributes, so in the example above only the `title` survives there. The start marker itself is kept exactly as written, and spacing inside the comment does not matter.
+Renderers sanitise html, so check what yours keeps. GitHub drops `style`, `class` and `id` but keeps `title`, `dir`, `lang`, `role` and `aria-*` attributes, so in the example above only the `title` survives there.
 
-Anything on the start marker that is not one of the two options or a well-formed attribute makes the pair skip with a warning rather than guess: a bare name other than the two options, so a typo like `collapsable` is caught, an unquoted value like `collapsed=yes`, both options at once, or attributes without an option to give them a summary element.
+#### `levels`
+
+`levels` limits the toc to a heading level or a range of levels, `levels="2"`, `levels="2-3"`, `levels="-3"` for everything up to `###` or `levels="3-"` for `###` and deeper. The levels are the heading's own, the number of `#`, wherever the marker sits, so a toc under `## API` that should list the `###` headings beneath it says `levels="3"`. The list starts flat at the shallowest level listed, so a changelog with `### Added` and `### Breaking` under every version gets a toc of the versions alone:
+
+```markdown
+<!-- toc levels="2" collapsed="Versions" -->
+<details>
+<summary>Versions</summary>
+
+- [v2.0.0 - 2026-09-18](#v200---2026-09-18)
+- [v1.1.0 - 2026-09-17](#v110---2026-09-17)
+
+</details>
+<!-- /toc -->
+
+## v2.0.0 - 2026-09-18
+
+### Breaking
+```
+
+A `levels` value that is not a level or a range between 1 and 6 is ignored with a warning, and the pair lists every level. The toc above, under Options, is a `levels="4"` one: without it every heading to the end of this file would be listed.
 
 ### What is left alone
 
@@ -159,20 +198,23 @@ This README has two headings named Options, the one above and the one under CLI.
 npx toc                        # updates README.md in the current directory
 npx toc docs/a.md docs/b.md    # several files
 npx toc docs/a.md,docs/b.md    # comma separated works too
+npx toc 'docs/**/*.md'         # glob patterns, quoted so the shell leaves them alone
 npx toc --dry-run README.md    # print the toc, write nothing
 npx toc --check README.md      # exit with 1 when a link to an anchor has no target
+npx toc -c -s docs/*.md        # write only the anchor warnings
 npx toc --help
 ```
 
-Paths are resolved against the current directory.
+Paths are resolved against the current directory. An argument with `*`, `?` or `[` is a glob pattern, expanded by the bin with Node's own `fs.glob`, so it works the same in an npm script on Windows, where the shell does not expand it, as on macOS and Linux. `**` matches subdirectories, `node_modules` is never entered, and the matches are processed in sorted order. A pattern that matches nothing is skipped with a warning. A file is processed once, however many arguments name or match it.
 
 ### Options
 
-| Option          | Effect                                                                        |
-| --------------- | ----------------------------------------------------------------------------- |
-| `-n, --dry-run` | Print the toc of every pair to stdout and the status to stderr, write nothing |
-| `-c, --check`   | Exit with 1 when a link to an anchor has no target                            |
-| `-h, --help`    | Show usage                                                                    |
+| Option          | Effect                                                                                         |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| `-n, --dry-run` | Print the toc of every pair to stdout and the status to stderr, write nothing                  |
+| `-c, --check`   | Exit with 1 when a link to an anchor has no target                                             |
+| `-s, --silent`  | Skip the status lines and the skipped warnings, keep missing files, anchor warnings and errors |
+| `-h, --help`    | Show usage                                                                                     |
 
 ### Output and exit code
 
@@ -182,6 +224,8 @@ One status line per file on stdout, and one warning per skipped file or pair on 
 | --------------------------------------------------------------------------------- | ------ | ---------------------------------------------------- |
 | `README.md: wrote TOC.`                                                           | stdout | At least one pair changed and the file was written   |
 | `README.md: TOC already up to date.`                                              | stdout | Every updatable pair was already correct             |
+| `README.md: no such file, skipped.`                                               | stderr | The file does not exist                              |
+| `docs/*.md: no matching file, skipped.`                                           | stderr | The pattern matched nothing                          |
 | `README.md: no TOC markers, skipped.`                                             | stderr | The file has no markers                              |
 | `README.md:3: TOC start marker without end marker, skipped.`                      | stderr | Unbalanced pair                                      |
 | `README.md:3: TOC end marker without start marker, skipped.`                      | stderr | Unbalanced pair                                      |
@@ -189,9 +233,10 @@ One status line per file on stdout, and one warning per skipped file or pair on 
 | `README.md:3: unknown TOC option foo, skipped.`                                   | stderr | The start marker has something that is not an option |
 | `README.md:3: TOC options collapsible and collapsed exclude each other, skipped.` | stderr | Pick one                                             |
 | `README.md:3: TOC attributes style need collapsible or collapsed, skipped.`       | stderr | There is no summary element to put them on           |
+| `README.md:3: TOC option levels "x" is not a level or a range like 2-3, ignored.` | stderr | Every level is listed instead                        |
 | `README.md:9: anchor #instal has no target.`                                      | stderr | A link points at a heading that does not exist       |
 | `README.md:9: anchor #Install has no target, did you mean #install?`              | stderr | Same, and a heading obviously matches                |
-| `README.md: ENOENT: no such file or directory, ...`                               | stderr | The file could not be read or written                |
+| `README.md: EISDIR: illegal operation on a directory, ...`                        | stderr | The file could not be read or written                |
 
 The exit code is 1 when a file could not be read or written, when an option is not recognised, or, with `--check`, when a link to an anchor has no target. Otherwise 0. Skipped files and pairs do not affect the exit code.
 
@@ -203,6 +248,12 @@ The warning ends with `did you mean` when the target is obvious: slugging the an
 
 ```sh
 npx toc --check docs/*.md
+```
+
+With `--silent` the status lines and the skipped warnings are dropped, so the output is the missing files, the anchor warnings and the errors alone. In a dry run the toc blocks are still printed to stdout.
+
+```sh
+npx toc --check --silent docs/*.md
 ```
 
 ### Dry run
@@ -260,7 +311,7 @@ To regenerate the toc and format the rest of the file in one go, let a `posttoc`
 import { buildToc, renderToc, findMarkers, findAnchors, slugify, headingText, TOC_START, TOC_END } from '@0dep/toc';
 ```
 
-CommonJS works the same way with `require('@0dep/toc')`.
+CommonJS works the same way with `require('@0dep/toc')`, there is no separate bundle since Node 22.12 requires ES modules natively.
 
 ### `buildToc(source)`
 
@@ -290,7 +341,7 @@ console.log(md);
 
 ### `renderToc(source[, fromLine[, options]])`
 
-Returns the toc block, markers included, for the headings below the zero based line `fromLine`, typically a start marker's line. By default every heading is listed. Returns an empty string when there is nothing to list. `options` are rendered into the start marker and the block, `{ collapsible: true }`, `{ collapsed: 'Contents', attributes: { class: 'toc' } }` and so on.
+Returns the toc block, markers included, for the headings below the zero based line `fromLine`, typically a start marker's line. By default every heading is listed. Returns an empty string when there is nothing to list. `options` are rendered into the start marker and the block, `{ collapsible: true }`, `{ collapsed: 'Contents', attributes: { class: 'toc' } }`, `{ levels: '2-3' }` and so on.
 
 ```javascript
 import { renderToc } from '@0dep/toc';
@@ -310,7 +361,7 @@ console.log(renderToc('# Title\n\n## Install\n\n### From npm\n'));
 
 ### `findMarkers(source)`
 
-Returns every marker pair in document order as `{ start, end, options }`, zero based line numbers outside fenced code blocks and the recognised options written on the start marker. A start marker pairs with the first end marker after it. A missing side is `-1`, a start marker without an end marker or an end marker with no open start before it. `options.attributes` holds the other `name="value"` pairs, when there are any. When the start marker cannot be used, `problem` says why and is otherwise absent.
+Returns every marker pair in document order as `{ start, end, options }`, zero based line numbers outside fenced code blocks and the recognised options written on the start marker. A start marker pairs with the first end marker after it. A missing side is `-1`, a start marker without an end marker or an end marker with no open start before it. `options.attributes` holds the other `name="value"` pairs, when there are any. When the start marker cannot be used, `problem` says why and is otherwise absent. When an option on it is ignored, a broken `levels` value, `warning` says so.
 
 ```javascript
 import { findMarkers } from '@0dep/toc';
@@ -387,6 +438,14 @@ The marker strings, `<!-- toc -->` and `<!-- /toc -->`, for code that wants to l
 - [License](#license)
 
 </details>
+<!-- /toc -->
+
+And one with `levels="2"`, which lists only the level 2 headings that follow:
+
+<!-- toc levels="2" -->
+
+- [License](#license)
+
 <!-- /toc -->
 
 ### What is listed

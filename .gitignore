@@ -42,6 +42,3 @@ dist/
 # AI
 CLAUDE.md
 .claude
-
-# Types
-*.d.ts.map

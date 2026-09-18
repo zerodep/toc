@@ -6,6 +6,7 @@
     "checkJs": true,
     "emitDeclarationOnly": false,
     "declaration": false,
+    "declarationMap": false,
     "noEmit": true,
     "types": ["node", "chai", "mocha"]
   }

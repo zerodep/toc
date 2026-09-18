@@ -17,6 +17,6 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: npm i --loglevel error
-      - run: npm run dist
+      - run: npm run types
       - run: npx mocha
       - run: npm run test:md

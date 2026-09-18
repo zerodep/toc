@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,12 +55,50 @@ describe('bin/toc.js', () => {
     expect(stdout).to.equal('a.md: wrote TOC.\nb.md: wrote TOC.\nc.md: wrote TOC.\n');
   });
 
-  it('exits with 1 and reports a missing file but still processes the rest', async () => {
+  it('expands a glob pattern and processes the matches in sorted order', async () => {
     await writeFile(join(dir, 'b.md'), '# B\n\n<!-- toc -->\n<!-- /toc -->\n\n## Two\n');
-    const err = await toc('missing.md', 'b.md').catch((e) => e);
+    await writeFile(join(dir, 'a.md'), '# A\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n');
+    await writeFile(join(dir, 'c.txt'), '# C\n\n<!-- toc -->\n<!-- /toc -->\n\n## Three\n');
+    const { stdout, stderr } = await toc('*.md');
+    expect(stdout).to.equal('a.md: wrote TOC.\nb.md: wrote TOC.\n');
+    expect(stderr).to.equal('');
+  });
+
+  it('expands ** into subdirectories but never into node_modules', async () => {
+    await mkdir(join(dir, 'docs', 'sub'), { recursive: true });
+    await mkdir(join(dir, 'docs', 'node_modules', 'dep'), { recursive: true });
+    await writeFile(join(dir, 'docs', 'a.md'), '# A\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n');
+    await writeFile(join(dir, 'docs', 'sub', 'b.md'), '# B\n\n<!-- toc -->\n<!-- /toc -->\n\n## Two\n');
+    await writeFile(join(dir, 'docs', 'node_modules', 'dep', 'README.md'), '# Dep\n\n<!-- toc -->\n<!-- /toc -->\n\n## Three\n');
+    const { stdout } = await toc('docs/**/*.md');
+    expect(stdout).to.equal(`${join('docs', 'a.md')}: wrote TOC.\n${join('docs', 'sub', 'b.md')}: wrote TOC.\n`);
+  });
+
+  it('processes a file once when a pattern and a name both point at it', async () => {
+    await writeFile(join(dir, 'a.md'), '# A\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n');
+    await writeFile(join(dir, 'b.md'), '# B\n\n<!-- toc -->\n<!-- /toc -->\n\n## Two\n');
+    const { stdout } = await toc('*.md', 'b.md', './a.md');
+    expect(stdout).to.equal('a.md: wrote TOC.\nb.md: wrote TOC.\n');
+  });
+
+  it('warns and skips a pattern that matches nothing, exits 0, and still processes the rest', async () => {
+    await writeFile(join(dir, 'b.md'), '# B\n\n<!-- toc -->\n<!-- /toc -->\n\n## Two\n');
+    const { stdout, stderr } = await toc('docs/*.md', 'b.md');
+    expect(stderr).to.equal('docs/*.md: no matching file, skipped.\n');
+    expect(stdout).to.equal('b.md: wrote TOC.\n');
+  });
+
+  it('warns and skips a missing file, exits 0, and still processes the rest', async () => {
+    await writeFile(join(dir, 'b.md'), '# B\n\n<!-- toc -->\n<!-- /toc -->\n\n## Two\n');
+    const { stdout, stderr } = await toc('missing.md', 'b.md');
+    expect(stderr).to.equal('missing.md: no such file, skipped.\n');
+    expect(stdout).to.equal('b.md: wrote TOC.\n');
+  });
+
+  it('exits with 1 and reports a file that cannot be read', async () => {
+    const err = await toc('.').catch((e) => e);
     expect(err.code).to.equal(1);
-    expect(err.stderr).to.match(/^missing\.md: ENOENT/);
-    expect(err.stdout).to.equal('b.md: wrote TOC.\n');
+    expect(err.stderr).to.match(/^\.: EISDIR/);
   });
 
   it('--dry-run prints the toc to stdout, the status to stderr, and leaves the file alone', async () => {
@@ -180,6 +218,25 @@ describe('bin/toc.js', () => {
     expect(stderr).to.equal('a.md: would write TOC.\n');
   });
 
+  it('--dry-run prints the levels in the range', async () => {
+    await writeFile(join(dir, 'a.md'), '<!-- toc levels="2" -->\n<!-- /toc -->\n\n## One\n\n### Two\n');
+    const { stdout, stderr } = await toc('-n', 'a.md');
+    expect(stdout).to.equal('<!-- toc levels="2" -->\n\n- [One](#one)\n\n<!-- /toc -->\n');
+    expect(stderr).to.equal('a.md: would write TOC.\n');
+  });
+
+  it('warns about a broken levels value, ignores it and still writes the pair', async () => {
+    await writeFile(join(dir, 'a.md'), '<!-- toc levels="9" -->\n<!-- /toc -->\n\n## One\n\n### Two\n');
+    const { stdout, stderr } = await toc('a.md');
+    expect(stderr).to.equal('a.md:1: TOC option levels "9" is not a level or a range like 2-3, ignored.\n');
+    expect(stdout).to.equal('a.md: wrote TOC.\n');
+    expect(await readFile(join(dir, 'a.md'), 'utf8')).to.equal(
+      '<!-- toc levels="9" -->\n\n- [One](#one)\n  - [Two](#two)\n\n<!-- /toc -->\n\n## One\n\n### Two\n',
+    );
+    const silent = await toc('-s', 'a.md');
+    expect(silent.stderr).to.equal('');
+  });
+
   it('--dry-run prints nothing and warns when there are no headings below the markers', async () => {
     await writeFile(join(dir, 'a.md'), '# Title\n\n<!-- toc -->\n<!-- /toc -->\n\ntext\n');
     const { stdout, stderr } = await toc('-n', 'a.md');
@@ -232,6 +289,52 @@ describe('bin/toc.js', () => {
     });
   });
 
+  describe('--silent', () => {
+    it('drops the status lines and the skipped warnings, keeps the anchor warnings', async () => {
+      await writeFile(join(dir, 'a.md'), '# Title\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n\n[two](#two)\n');
+      await writeFile(join(dir, 'b.md'), '# Title\n\n<!-- toc -->\n\n## One\n');
+      await writeFile(join(dir, 'c.md'), '# Title\n\n[one](#one)\n');
+      const { stdout, stderr } = await toc('--silent', 'a.md', 'b.md', 'c.md');
+      expect(stdout).to.equal('');
+      expect(stderr).to.equal('a.md:8: anchor #two has no target.\nc.md:3: anchor #one has no target.\n');
+      expect(await readFile(join(dir, 'a.md'), 'utf8')).to.include('- [One](#one)');
+    });
+
+    it('-s with -c writes only the anchor warnings and exits 1', async () => {
+      await writeFile(join(dir, 'a.md'), '# Title\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n\n[two](#two)\n');
+      const err = await toc('-c', '-s', 'a.md').catch((e) => e);
+      expect(err.code).to.equal(1);
+      expect(err.stdout).to.equal('');
+      expect(err.stderr).to.equal('a.md:8: anchor #two has no target.\n');
+    });
+
+    it('is quiet when every anchor has a target', async () => {
+      await writeFile(join(dir, 'a.md'), '# Title\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n\n[one](#one)\n');
+      const { stdout, stderr } = await toc('-c', '-s', 'a.md');
+      expect(stdout).to.equal('');
+      expect(stderr).to.equal('');
+    });
+
+    it('keeps the missing file and no match warnings', async () => {
+      const { stdout, stderr } = await toc('-s', 'missing.md', '*.txt');
+      expect(stdout).to.equal('');
+      expect(stderr).to.equal('missing.md: no such file, skipped.\n*.txt: no matching file, skipped.\n');
+    });
+
+    it('still reports a file that cannot be read', async () => {
+      const err = await toc('-s', '.').catch((e) => e);
+      expect(err.code).to.equal(1);
+      expect(err.stderr).to.match(/^\.: EISDIR/);
+    });
+
+    it('with --dry-run still prints the toc but no status', async () => {
+      await writeFile(join(dir, 'a.md'), '# Title\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n');
+      const { stdout, stderr } = await toc('-n', '-s', 'a.md');
+      expect(stdout).to.equal('<!-- toc -->\n\n- [One](#one)\n\n<!-- /toc -->\n');
+      expect(stderr).to.equal('');
+    });
+  });
+
   it('--help prints usage and exits 0', async () => {
     for (const flag of ['--help', '-h']) {
       const { stdout } = await toc(flag);
@@ -256,20 +359,26 @@ describe('bin/toc.js', () => {
       const source = await readFile(join(repoRoot, 'README.md'), 'utf8');
       const lines = source.split('\n');
       const blocks = findMarkers(source).map(({ start, end }) => lines.slice(start, end + 1).join('\n'));
-      expect(blocks).to.have.length(3);
+      expect(blocks).to.have.length(5);
       expect(stdout).to.equal(blocks.join('\n') + '\n');
     });
 
-    it('has a plain toc at the top, a collapsed one under API, a collapsible one under Headings, and a deduped anchor', async () => {
+    it('has a plain toc at the top, a levels one under Options, a collapsed one under API, a collapsible and a levels one under Headings, and a deduped anchor', async () => {
       const source = await readFile(join(repoRoot, 'README.md'), 'utf8');
       expect(findMarkers(source).map((m) => m.options)).to.deep.equal([
         {},
+        { levels: '4' },
         { collapsed: 'Jump to' },
         { collapsible: 'In this section and below' },
+        { levels: '2' },
       ]);
+      expect(source).to.include(
+        '<!-- toc levels="4" -->\n\n- [`collapsible` and `collapsed`](#collapsible-and-collapsed)\n- [Summary attributes](#summary-attributes)\n- [`levels`](#levels)\n\n<!-- /toc -->',
+      );
       expect(source).to.include('<!-- toc -->\n\n- [Install](#install)');
       expect(source).to.include('<details>\n<summary>Jump to</summary>');
       expect(source).to.include('<details open>\n<summary>In this section and below</summary>\n\n- [What is listed](#what-is-listed)');
+      expect(source).to.include('<!-- toc levels="2" -->\n\n- [License](#license)\n\n<!-- /toc -->');
       expect(source).to.include('- [Options](#options)\n');
       expect(source).to.include('- [Options](#options-1)\n');
     });
