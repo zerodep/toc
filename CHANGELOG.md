@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 <!-- toc levels="2" -->
 
+- [v2.1.0 - 2026-09-20](#v210---2026-09-20)
 - [v2.0.0 - 2026-09-18](#v200---2026-09-18)
 - [v1.1.0 - 2026-09-17](#v110---2026-09-17)
 - [v1.0.1 - 2026-09-12](#v101---2026-09-12)
@@ -11,6 +12,10 @@ All notable changes to this project will be documented in this file.
 - [v0.0.1 - 2026-09-12](#v001---2026-09-12)
 
 <!-- /toc -->
+
+## v2.1.0 - 2026-09-20
+
+- Node 20.19 or later again. The bin looks `fs.glob` up only when an argument is a glob pattern and warns and skips the pattern on a Node without it, so plain file arguments and `require('@0dep/toc')` work on Node 20.19
 
 ## v2.0.0 - 2026-09-18
 

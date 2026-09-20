@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
-import { glob, readFile, writeFile } from 'node:fs/promises';
+import * as fs from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 
 import { buildToc, findAnchors, findMarkers, renderToc } from '../index.js';
+
+const PATTERN = /[*?[]/;
 
 const USAGE = `Usage: toc [options] [file...]
 
@@ -28,8 +30,9 @@ Files are resolved against the current directory and default to
 README.md. Several files can be given as separate arguments or comma
 separated. An argument with *, ? or [ is a glob pattern, ** matches
 subdirectories, node_modules is never entered. A pattern that matches
-nothing is skipped with a warning. A file is processed once, however
-many arguments name or match it.
+nothing is skipped with a warning, and so is every pattern on a Node
+before 22, which has no fs.glob. A file is processed once, however many
+arguments name or match it.
 
 Options:
   -n, --dry-run  print the toc to stdout and report on stderr, write nothing.
@@ -58,6 +61,10 @@ async function main() {
 
   const seen = new Set();
   for (const arg of files) {
+    if (PATTERN.test(arg) && typeof fs.glob !== 'function') {
+      console.error(`${arg}: glob patterns need Node 22 or later, skipped.`);
+      continue;
+    }
     const matches = await expand(arg);
     if (!matches.length) console.error(`${arg}: no matching file, skipped.`);
     for (const file of matches) {
@@ -84,9 +91,9 @@ async function main() {
  * @returns {Promise<string[]>}
  */
 async function expand(arg) {
-  if (!/[*?[]/.test(arg)) return [arg];
+  if (!PATTERN.test(arg)) return [arg];
   const matches = [];
-  for await (const file of glob(arg, { exclude: (path) => basename(path) === 'node_modules' })) matches.push(file);
+  for await (const file of fs.glob(arg, { exclude: (path) => basename(path) === 'node_modules' })) matches.push(file);
   return matches.sort();
 }
 
@@ -96,7 +103,7 @@ async function expand(arg) {
  * @param {{ dryRun: boolean, check: boolean, silent: boolean }} flags
  */
 async function processFile(file, { dryRun, check, silent }) {
-  const source = await readFile(file, 'utf8');
+  const source = await fs.readFile(file, 'utf8');
   const status = silent ? noop : dryRun ? console.error : console.log;
   const warn = console.error;
 
@@ -115,7 +122,7 @@ async function processFile(file, { dryRun, check, silent }) {
     if (check) process.exitCode = 1;
   }
 
-  if (!dryRun && updated !== source) await writeFile(file, updated);
+  if (!dryRun && updated !== source) await fs.writeFile(file, updated);
 }
 
 /**

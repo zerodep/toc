@@ -2,7 +2,7 @@
 
 [![Build](https://github.com/zerodep/toc/actions/workflows/build.yaml/badge.svg)](https://github.com/zerodep/toc/actions/workflows/build.yaml)[![Build (Windows)](https://github.com/zerodep/toc/actions/workflows/build-windows.yaml/badge.svg)](https://github.com/zerodep/toc/actions/workflows/build-windows.yaml)[![Coverage Status](https://coveralls.io/repos/github/zerodep/toc/badge.svg?branch=main)](https://coveralls.io/github/zerodep/toc?branch=main)
 
-Generate a GitHub flavoured table of contents for markdown files. No dependencies. The library is string in, string out and runs in the browser too. Node 22.12 or later for the `toc` bin and for `require`.
+Generate a GitHub flavoured table of contents for markdown files. No dependencies. The library is string in, string out and runs in the browser too. Node 20.19 or later for the `toc` bin and for `require`, glob patterns need Node 22.
 
 The toc is written between `<!-- toc -->` and `<!-- /toc -->` markers, and only there. Nothing outside the markers is ever touched, nothing is inserted or guessed. Slugs match GitHub's anchors, and every link to an anchor in the document is checked against them.
 
@@ -205,7 +205,7 @@ npx toc -c -s docs/*.md        # write only the anchor warnings
 npx toc --help
 ```
 
-Paths are resolved against the current directory. An argument with `*`, `?` or `[` is a glob pattern, expanded by the bin with Node's own `fs.glob`, so it works the same in an npm script on Windows, where the shell does not expand it, as on macOS and Linux. `**` matches subdirectories, `node_modules` is never entered, and the matches are processed in sorted order. A pattern that matches nothing is skipped with a warning. A file is processed once, however many arguments name or match it.
+Paths are resolved against the current directory. An argument with `*`, `?` or `[` is a glob pattern, expanded by the bin with Node's own `fs.glob`, so it works the same in an npm script on Windows, where the shell does not expand it, as on macOS and Linux. `**` matches subdirectories, `node_modules` is never entered, and the matches are processed in sorted order. A pattern that matches nothing is skipped with a warning, and so is every pattern on Node 20, which has no `fs.glob`. A file is processed once, however many arguments name or match it.
 
 ### Options
 
@@ -311,7 +311,7 @@ To regenerate the toc and format the rest of the file in one go, let a `posttoc`
 import { buildToc, renderToc, findMarkers, findAnchors, slugify, headingText, TOC_START, TOC_END } from '@0dep/toc';
 ```
 
-CommonJS works the same way with `require('@0dep/toc')`, there is no separate bundle since Node 22.12 requires ES modules natively.
+CommonJS works the same way with `require('@0dep/toc')`, there is no separate bundle since Node 20.19 and 22.12 require ES modules natively.
 
 ### `buildToc(source)`
 

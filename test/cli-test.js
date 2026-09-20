@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import * as fs from 'node:fs/promises';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,7 @@ import { findMarkers } from '@0dep/toc';
 const run = promisify(execFile);
 const bin = fileURLToPath(new URL('../bin/toc.js', import.meta.url));
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
+const itWithGlob = typeof fs.glob === 'function' ? it : it.skip;
 
 describe('bin/toc.js', () => {
   /** @type {string} */
@@ -55,7 +57,7 @@ describe('bin/toc.js', () => {
     expect(stdout).to.equal('a.md: wrote TOC.\nb.md: wrote TOC.\nc.md: wrote TOC.\n');
   });
 
-  it('expands a glob pattern and processes the matches in sorted order', async () => {
+  itWithGlob('expands a glob pattern and processes the matches in sorted order', async () => {
     await writeFile(join(dir, 'b.md'), '# B\n\n<!-- toc -->\n<!-- /toc -->\n\n## Two\n');
     await writeFile(join(dir, 'a.md'), '# A\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n');
     await writeFile(join(dir, 'c.txt'), '# C\n\n<!-- toc -->\n<!-- /toc -->\n\n## Three\n');
@@ -64,7 +66,7 @@ describe('bin/toc.js', () => {
     expect(stderr).to.equal('');
   });
 
-  it('expands ** into subdirectories but never into node_modules', async () => {
+  itWithGlob('expands ** into subdirectories but never into node_modules', async () => {
     await mkdir(join(dir, 'docs', 'sub'), { recursive: true });
     await mkdir(join(dir, 'docs', 'node_modules', 'dep'), { recursive: true });
     await writeFile(join(dir, 'docs', 'a.md'), '# A\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n');
@@ -74,17 +76,26 @@ describe('bin/toc.js', () => {
     expect(stdout).to.equal(`${join('docs', 'a.md')}: wrote TOC.\n${join('docs', 'sub', 'b.md')}: wrote TOC.\n`);
   });
 
-  it('processes a file once when a pattern and a name both point at it', async () => {
+  itWithGlob('processes a file once when a pattern and a name both point at it', async () => {
     await writeFile(join(dir, 'a.md'), '# A\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n');
     await writeFile(join(dir, 'b.md'), '# B\n\n<!-- toc -->\n<!-- /toc -->\n\n## Two\n');
     const { stdout } = await toc('*.md', 'b.md', './a.md');
     expect(stdout).to.equal('a.md: wrote TOC.\nb.md: wrote TOC.\n');
   });
 
-  it('warns and skips a pattern that matches nothing, exits 0, and still processes the rest', async () => {
+  itWithGlob('warns and skips a pattern that matches nothing, exits 0, and still processes the rest', async () => {
     await writeFile(join(dir, 'b.md'), '# B\n\n<!-- toc -->\n<!-- /toc -->\n\n## Two\n');
     const { stdout, stderr } = await toc('docs/*.md', 'b.md');
     expect(stderr).to.equal('docs/*.md: no matching file, skipped.\n');
+    expect(stdout).to.equal('b.md: wrote TOC.\n');
+  });
+
+  it('warns and skips a glob pattern when Node has no fs.glob, exits 0, and still processes the rest', async () => {
+    await writeFile(join(dir, 'a.md'), '# A\n\n<!-- toc -->\n<!-- /toc -->\n\n## One\n');
+    await writeFile(join(dir, 'b.md'), '# B\n\n<!-- toc -->\n<!-- /toc -->\n\n## Two\n');
+    await writeFile(join(dir, 'no-glob.cjs'), "delete require('fs/promises').glob;\n");
+    const { stdout, stderr } = await run(process.execPath, ['-r', join(dir, 'no-glob.cjs'), bin, '*.md', 'b.md'], { cwd: dir });
+    expect(stderr).to.equal('*.md: glob patterns need Node 22 or later, skipped.\n');
     expect(stdout).to.equal('b.md: wrote TOC.\n');
   });
 
@@ -315,7 +326,7 @@ describe('bin/toc.js', () => {
       expect(stderr).to.equal('');
     });
 
-    it('keeps the missing file and no match warnings', async () => {
+    itWithGlob('keeps the missing file and no match warnings', async () => {
       const { stdout, stderr } = await toc('-s', 'missing.md', '*.txt');
       expect(stdout).to.equal('');
       expect(stderr).to.equal('missing.md: no such file, skipped.\n*.txt: no matching file, skipped.\n');
